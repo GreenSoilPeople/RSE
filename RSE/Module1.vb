@@ -6,7 +6,6 @@ Imports System.Reflection.Emit
 Module Module1
 
     Private Options As Options
-    Private records As IEnumerable(Of RSERecord)
     Private fileNameBrand As Dictionary(Of String, String) = New Dictionary(Of String, String) From {{"A", "Audi"}, {"V", "VW PKW"}, {"C", "Skoda"}, {"S", "Seat"}, {"P", "Porsche"}, {"G", "Weltauto"}, {"L", "LNF"}}
     Private header As String
     Private week As String
@@ -25,14 +24,6 @@ Module Module1
             Return
         End If
 
-        Dim engine As New FH.FileHelperEngine(Of RSERecord)
-        records = engine.ReadFile(Options.InputFile)
-
-        week = Right(records.OrderByDescending(Function(r) r.Week).First.Week, 2)
-
-        header = GetType(RSERecord).GetCsvHeader
-
-        Console.WriteLine($"Processign file {Options.InputFile}")
 
         If ParseFile() Then
             If Options.Rename Then
@@ -44,12 +35,71 @@ Module Module1
         Console.ReadLine()
     End Sub
 
+    Private Sub Autodetect()
+        Dim detector As New FH.Detection.SmartFormatDetector
+        Dim formats = detector.DetectFileFormat("D:\RAPORT RSE\RSE_SUMMARY.csv")
+
+
+
+        'For Each f In formats
+        '    Console.WriteLine($"Format Detected, confidence: {f.Confidence}%")
+        '    Dim delimited = f.ClassBuilderAsDelimited
+
+        '    Console.WriteLine($"    Delimiter: {delimited.Delimiter}")
+        '    Console.WriteLine($"    Fields:")
+
+        '    For Each field In delimited.Fields
+        '        Console.WriteLine($"        {field.FieldName}: {field.FieldType}")
+        '    Next
+        'Next
+        Dim InputFile As String = "D:\RAPORT RSE\RSE_SUMMARY.csv"
+
+        Dim exportPath As String = "D:\RAPORT RSE\RSE_SUMMARY_auto.xls"
+        Dim delimited = formats(0).ClassBuilderAsDelimited
+
+        Dim recClass = delimited.CreateRecordClass()
+
+
+
+        Dim provider As New FH.ExcelNPOIStorage.ExcelNPOIStorage(recClass, exportPath, 0, 0)
+
+        Dim engine As New FH.FileHelperEngine(recClass)
+
+
+        Dim records = engine.ReadFile(InputFile)
+
+        'provider.ColumnsHeaders.AddRange(header.Split(records(0).GetType.Delimiter))
+
+        provider.InsertRecords(records.ToArray)
+
+    End Sub
+
     Private Function ParseFile() As Boolean
+        Dim detector As New FH.Detection.SmartFormatDetector
+        Dim formats = detector.DetectFileFormat(Options.InputFile)
+
+        Dim delimited = formats(0).ClassBuilderAsDelimited
+
+        Dim recClass = delimited.CreateRecordClass()
+
+
+        Dim engine As New FH.FileHelperEngine(recClass)
+        Dim records = engine.ReadFile(Options.InputFile)
+
+        week = Right(records.OrderByDescending(Function(r) r.Week).First.Week, 2)
+
+        'header = recClass.GetCsvHeader
+        header = New IO.StreamReader(Options.InputFile).ReadLine
+
+
+
+        Console.WriteLine($"Processign file {Options.InputFile}")
+
 
         For Each brand As KeyValuePair(Of String, String) In fileNameBrand
 
             Console.Write($"Exporting brand {brand.Value}...")
-            Dim filtered = From record As RSERecord In records
+            Dim filtered = From record In records
                            Where record.Brands.Contains(brand.Key)
                            Select record
 
@@ -73,9 +123,9 @@ Module Module1
                 Next
             End If
 
-            Dim provider As New FH.ExcelNPOIStorage.ExcelNPOIStorage(GetType(RSERecord), exportPath, 0, 0)
+            Dim provider As New FH.ExcelNPOIStorage.ExcelNPOIStorage(recClass, exportPath, 0, 0)
 
-            provider.ColumnsHeaders.AddRange(header.Split(records(0).GetType.Delimiter))
+            provider.ColumnsHeaders.AddRange(header.Split(delimited.Delimiter))
 
             provider.InsertRecords(filtered.ToArray)
             Console.Write($"OK{vbNewLine}")
@@ -85,47 +135,4 @@ Module Module1
 
     End Function
 
-    Private Function AutoGenerateClass() As Type
-
-    End Function
-
-    Public Function CreateClass(ByVal className As String, ByVal properties As Dictionary(Of String, Type)) As Type
-
-        Dim myDomain As AppDomain = AppDomain.CurrentDomain
-        Dim myAsmName As New AssemblyName("MyAssembly")
-        Dim myAssembly As AssemblyBuilder = myDomain.DefineDynamicAssembly(myAsmName, AssemblyBuilderAccess.Run)
-
-        Dim myModule As ModuleBuilder = myAssembly.DefineDynamicModule("MyModule")
-
-        Dim myType As TypeBuilder = myModule.DefineType(className, TypeAttributes.Public)
-
-        myType.DefineDefaultConstructor(MethodAttributes.Public)
-
-        For Each o In properties
-
-            Dim prop As PropertyBuilder = myType.DefineProperty(o.Key, PropertyAttributes.HasDefault, o.Value, Nothing)
-
-            Dim field As FieldBuilder = myType.DefineField("_" + o.Key, o.Value, FieldAttributes.[Private])
-
-            Dim getter As MethodBuilder = myType.DefineMethod("get_" + o.Key, MethodAttributes.[Public] Or MethodAttributes.SpecialName Or MethodAttributes.HideBySig, o.Value, Type.EmptyTypes)
-            Dim getterIL As ILGenerator = getter.GetILGenerator()
-            getterIL.Emit(OpCodes.Ldarg_0)
-            getterIL.Emit(OpCodes.Ldfld, field)
-            getterIL.Emit(OpCodes.Ret)
-
-            Dim setter As MethodBuilder = myType.DefineMethod("set_" + o.Key, MethodAttributes.[Public] Or MethodAttributes.SpecialName Or MethodAttributes.HideBySig, Nothing, New Type() {o.Value})
-            Dim setterIL As ILGenerator = setter.GetILGenerator()
-            setterIL.Emit(OpCodes.Ldarg_0)
-            setterIL.Emit(OpCodes.Ldarg_1)
-            setterIL.Emit(OpCodes.Stfld, field)
-            setterIL.Emit(OpCodes.Ret)
-
-            prop.SetGetMethod(getter)
-            prop.SetSetMethod(setter)
-
-        Next
-
-        Return myType.CreateType()
-
-    End Function
 End Module
